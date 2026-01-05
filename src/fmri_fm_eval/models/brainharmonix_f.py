@@ -19,7 +19,8 @@ try:
     from brainharmonix.configs.harmonizer.stage0_embed import conf_embed_downstream
 except ImportError as exc:
     raise ImportError(
-        "brainharmonix not installed. Please install the brainharmonix extra."
+        "brainharmonix not installed. Please install the brainharmonix extra "
+        "with `uv sync --extra brainharmonix`."
     ) from exc
 
 
@@ -29,14 +30,17 @@ BRAIN_HARMONY_CACHE_DIR = Path.home() / ".cache" / "fmri-fm-eval" / "brain-harmo
 class BrainHarmonixFTransform:
     # constant values copied from original config
     # https://github.com/hzlab/Brain-Harmony/blob/453edc18aed68d834401159f81757297d0c5281f/configs/harmonizer/stage0_embed/conf_embed_downstream.py#L103-L104
+    # duration of "standard" patch in seconds
+    # real patch size is adjusted based on tr so that each patch matches this duration
     standard_time = 48 * 0.735
+    # standard number of temporal patches in a sequence
     target_num_patches = 18
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         bold = sample["bold"]  # (T, D) - z-score normalized data
         mean = sample["mean"]  # (1, D)
         std = sample["std"]  # (1, D)
-        tr = sample["tr"]  # float - repetition time
+        tr = float(sample["tr"])  # float - repetition time
 
         # Convert z-scored data back to raw signal
         bold = bold * std + mean
@@ -101,6 +105,10 @@ class BrainHarmonixFTransform:
             all_bold_mean.append(mean.squeeze(0))
 
         # compute median and iqr over ROI means
+        # note, it is a bit strange to scale only by the iqr of the *mean*. this will be
+        # like 1 / sqrt(T) * iqr of the actual data. if the eval time series are much
+        # different sequence length than the training data, you will get a significant
+        # scale difference.
         all_bold_mean = torch.stack(all_bold_mean)
         q = torch.tensor([0.25, 0.5, 0.75], dtype=all_bold_mean.dtype)
         q1, median, q3 = torch.quantile(all_bold_mean, q, dim=0)
